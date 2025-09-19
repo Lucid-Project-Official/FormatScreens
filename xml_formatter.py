@@ -53,7 +53,11 @@ class XMLFormatter:
         modified_content = content
         
         for pattern, replacement in self.transformations.items():
-            modified_content = re.sub(pattern, replacement, modified_content)
+            # Compter les occurrences avant remplacement
+            matches = re.findall(pattern, modified_content)
+            if matches:
+                print(f"    🔄 Trouvé {len(matches)} occurrence(s) du pattern: {pattern}")
+                modified_content = re.sub(pattern, replacement, modified_content)
             
         return modified_content
 
@@ -90,6 +94,10 @@ class XMLFormatter:
             
             return match.group(0)
         
+        # Debug : vérifier si le pattern principal trouve des matches
+        exp_props_matches = re.findall(exp_props_pattern, modified_content)
+        print(f"    🔍 Pattern ExpProps trouvé {len(exp_props_matches)} match(es)")
+        
         # Appliquer le remplacement pour les blocs ExpProps
         modified_content = re.sub(exp_props_pattern, process_exp_props, modified_content)
         
@@ -107,6 +115,10 @@ class XMLFormatter:
                 return result
             
             return full_segment
+        
+        # Debug : vérifier si le pattern de secours trouve des matches
+        fallback_matches = re.findall(fallback_pattern, modified_content)
+        print(f"    🔍 Pattern fallback trouvé {len(fallback_matches)} match(es)")
         
         # Appliquer le remplacement de secours
         modified_content = re.sub(fallback_pattern, fallback_replace, modified_content)
@@ -198,13 +210,26 @@ class XMLFormatter:
             # Appliquer les transformations
             modified_content = original_content
             
+            # Debug : vérifier la présence des patterns à traiter
+            has_no_variable_linked = '&amp;lt;no variable linked&amp;gt;' in original_content
+            has_bg_intelliblower = 'BGIntelliBlowerNumberStation[' in original_content
+            
+            print(f"  🔍 Debug: Contient 'no variable linked': {has_no_variable_linked}")
+            print(f"  🔍 Debug: Contient 'BGIntelliBlowerNumberStation': {has_bg_intelliblower}")
+            
+            if has_no_variable_linked:
+                print(f"  🔍 Debug: Nombre d'occurrences 'no variable linked': {original_content.count('&amp;lt;no variable linked&amp;gt;')}")
+            
             # 1. Transformations de base (changements de casse)
+            print(f"  📝 Étape 1: Transformations de base...")
             modified_content = self.apply_basic_transformations(modified_content)
             
             # 2. Correction des "no variable linked" (détection automatique)
+            print(f"  📝 Étape 2: Correction 'no variable linked'...")
             modified_content = self.fix_no_variable_linked(modified_content)
             
             # 3. Synchronisation générale des variables
+            print(f"  📝 Étape 3: Synchronisation des variables...")
             modified_content = self.synchronize_variables(modified_content)
             
             # Vérifier s'il y a eu des changements
