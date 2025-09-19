@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Application Python pour modifier le contenu des fichiers XML
-selon la logique identifiée dans les fichiers d'exemple.
+Application Python intelligente pour modifier le contenu des fichiers XML
+avec détection automatique des variables.
 
 Transformations appliquées :
-1. BGIntelliBlowerNumberStation[1] → BGintelliBlowerNumberStation[1] (changement de casse)
-2. Remplacement de &amp;lt;no variable linked&amp;gt; par les vraies variables
-3. Synchronisation des variables PvID et SymVarName
+1. Correction automatique de la casse (ex: BGIntelliBlowerNumberStation → BGintelliBlowerNumberStation)
+2. Détection automatique des variables à partir de SymVarName
+3. Remplacement intelligent de &amp;lt;no variable linked&amp;gt; par les vraies variables
+4. Synchronisation automatique entre PvID, balises principales et SymVarName
+
+AVANTAGE : Plus besoin de mapping manuel ! L'application détecte automatiquement 
+les variables correctes à partir du contenu SymVarName de chaque bloc.
 """
 
 import os
@@ -29,15 +33,7 @@ class XMLFormatter:
             # Ces mappings sont basés sur l'analyse de votre exemple
         }
         
-        # Mapping des variables pour remplacer "&amp;lt;no variable linked&amp;gt;"
-        self.variable_mappings = {
-            'BarGraph.XVariable': 'BGIntelliBlowerSpace[1]',
-            'OutOfRangeHigh.XVariable': 'BGIntelliBlowerSpace[1]',
-            'NumberStation.VisibilityVariable': 'BGIntelliBlowerVisuPointA[1]',
-            'OutOfRangeDown.XVariable': 'BGIntelliBlowerSpace[1]',
-            'BarGraph.VisibilityVariable': 'BGIntelliBlowerVisuPointA[1]',
-            'NumberStation.XVariable': 'BGIntelliBlowerSpace[1]',
-        }
+        # Plus besoin de mapping fixe - détection automatique des variables !
 
     def backup_file(self, file_path: Path) -> Path:
         """Crée une sauvegarde du fichier original."""
@@ -57,39 +53,97 @@ class XMLFormatter:
 
     def fix_no_variable_linked(self, content: str) -> str:
         """
-        Remplace les occurrences de "&amp;lt;no variable linked&amp;gt;" 
-        par les vraies variables selon le contexte.
+        Détecte automatiquement les variables à partir des SymVarName et 
+        synchronise les PvID avec les vraies variables.
         """
         modified_content = content
         
         # Pattern pour trouver les blocs ExpProps avec "no variable linked"
-        pattern = r'<ExpProps_(\d+)[^>]*>.*?<Name>([^<]+)</Name>.*?<ExpPropValue>(.*?)&amp;lt;no variable linked&amp;gt;(.*?)</ExpPropValue>.*?</ExpProps_\1>'
+        pattern = r'<ExpProps_(\d+)[^>]*>.*?<Name>([^<]+)</Name>.*?<ExpPropValue>(.*?)</ExpPropValue>.*?</ExpProps_\1>'
         
         def replace_no_variable(match):
             prop_num = match.group(1)
             name = match.group(2)
-            before_var = match.group(3)
-            after_var = match.group(4)
+            exp_prop_value = match.group(3)
             
-            # Chercher la variable correspondante dans notre mapping
-            if name in self.variable_mappings:
-                replacement_var = self.variable_mappings[name]
-                
-                # Reconstruire le bloc avec la vraie variable
-                new_before = before_var.replace('&amp;lt;no variable linked&amp;gt;', replacement_var)
-                
-                # Mettre à jour aussi le SymVarName si présent
-                new_after = re.sub(
-                    r'<SymVarName>([^<]*)</SymVarName>',
-                    f'<SymVarName>{replacement_var}</SymVarName>',
-                    after_var
-                )
-                
-                return f'<ExpProps_{prop_num} NODE="zenOn(R) embedded object"><Name>{name}</Name><ExpPropValue>{new_before}{replacement_var}{new_after}</ExpPropValue></ExpProps_{prop_num}>'
+            # Chercher la variable dans SymVarName
+            sym_var_match = re.search(r'<SymVarName>([^<]+)</SymVarName>', exp_prop_value)
             
-            return match.group(0)  # Retourner inchangé si pas de mapping trouvé
+            if sym_var_match:
+                sym_var_name = sym_var_match.group(1)
+                
+                # Si SymVarName n'est pas vide et qu'on a "no variable linked" dans PvID
+                if sym_var_name and sym_var_name.strip() and '&amp;lt;no variable linked&amp;gt;' in exp_prop_value:
+                    print(f"  🔄 Synchronisation détectée pour {name}: '{sym_var_name}'")
+                    
+                    # Remplacer "&amp;lt;no variable linked&amp;gt;" par la vraie variable
+                    new_exp_prop_value = exp_prop_value.replace(
+                        '&amp;lt;no variable linked&amp;gt;', 
+                        sym_var_name
+                    )
+                    
+                    # Construire le nouveau bloc ExpProps
+                    return f'<ExpProps_{prop_num} NODE="zenOn(R) embedded object"><Name>{name}</Name><ExpPropValue>{new_exp_prop_value}</ExpPropValue></ExpProps_{prop_num}>'
+            
+            return match.group(0)  # Retourner inchangé si pas de SymVarName trouvé
         
         modified_content = re.sub(pattern, replace_no_variable, modified_content, flags=re.DOTALL)
+        
+        return modified_content
+
+    def synchronize_variables(self, content: str) -> str:
+        """
+        Synchronise toutes les variables : si une variable existe dans SymVarName,
+        elle doit aussi être présente dans PvID et dans la balise principale.
+        """
+        modified_content = content
+        
+        # Pattern pour trouver tous les blocs ExpProps
+        pattern = r'<ExpProps_(\d+)[^>]*>.*?<Name>([^<]+)</Name>.*?<ExpPropValue>(.*?)</ExpPropValue>.*?</ExpProps_\1>'
+        
+        def synchronize_block(match):
+            prop_num = match.group(1)
+            name = match.group(2)
+            exp_prop_value = match.group(3)
+            
+            # Chercher la variable dans SymVarName
+            sym_var_match = re.search(r'<SymVarName>([^<]+)</SymVarName>', exp_prop_value)
+            
+            if sym_var_match:
+                sym_var_name = sym_var_match.group(1)
+                
+                # Si SymVarName contient une vraie variable (pas vide)
+                if sym_var_name and sym_var_name.strip():
+                    # Extraire le type de variable (ex: "BackColorVariable2", "Variable", etc.)
+                    var_type_match = re.search(r'&lt;(\w+)\s+Ver="1"[^&]*&gt;([^&]*)', exp_prop_value)
+                    
+                    if var_type_match:
+                        var_type = var_type_match.group(1)
+                        current_var = var_type_match.group(2)
+                        
+                        # Si la variable actuelle ne correspond pas à SymVarName
+                        if current_var != sym_var_name:
+                            print(f"  🔄 Synchronisation {name}: '{current_var}' → '{sym_var_name}'")
+                            
+                            # Remplacer dans la balise principale
+                            new_exp_prop_value = re.sub(
+                                r'(&lt;' + re.escape(var_type) + r'\s+Ver="1"[^&]*&gt;)[^&]*',
+                                r'\1' + sym_var_name,
+                                exp_prop_value
+                            )
+                            
+                            # Remplacer dans PvID
+                            new_exp_prop_value = re.sub(
+                                r'PvID="[^"]*"',
+                                f'PvID="{sym_var_name}"',
+                                new_exp_prop_value
+                            )
+                            
+                            return f'<ExpProps_{prop_num} NODE="zenOn(R) embedded object"><Name>{name}</Name><ExpPropValue>{new_exp_prop_value}</ExpPropValue></ExpProps_{prop_num}>'
+            
+            return match.group(0)  # Retourner inchangé
+        
+        modified_content = re.sub(pattern, synchronize_block, modified_content, flags=re.DOTALL)
         
         return modified_content
 
@@ -116,11 +170,14 @@ class XMLFormatter:
             # Appliquer les transformations
             modified_content = original_content
             
-            # 1. Transformations de base
+            # 1. Transformations de base (changements de casse)
             modified_content = self.apply_basic_transformations(modified_content)
             
-            # 2. Correction des "no variable linked"
+            # 2. Correction des "no variable linked" (détection automatique)
             modified_content = self.fix_no_variable_linked(modified_content)
+            
+            # 3. Synchronisation générale des variables
+            modified_content = self.synchronize_variables(modified_content)
             
             # Vérifier s'il y a eu des changements
             if modified_content != original_content:
