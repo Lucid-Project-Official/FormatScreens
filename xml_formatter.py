@@ -25,13 +25,8 @@ class XMLFormatter:
     """Classe pour formater les fichiers XML selon les patterns identifiés."""
     
     def __init__(self):
-        self.transformations = {
-            # Transformation 1: Correction de la casse
-            r'BGIntelliBlowerNumberStation\[': 'BGintelliBlowerNumberStation[',
-            
-            # Transformation 2: Mapping des variables "no variable linked"
-            # Ces mappings sont basés sur l'analyse de votre exemple
-        }
+        # Aucune transformation fixe - tout est détecté automatiquement
+        self.transformations = {}
         
         # Plus besoin de mapping fixe - détection automatique des variables !
 
@@ -63,65 +58,50 @@ class XMLFormatter:
 
     def fix_no_variable_linked(self, content: str) -> str:
         """
-        Détecte automatiquement les variables à partir des SymVarName et 
-        synchronise les PvID avec les vraies variables.
-        Gère le XML sur une seule ligne.
+        Logique simple : trouve tous les segments qui ont "no variable linked" 
+        et une SymVarName, puis remplace par la variable trouvée.
         """
         modified_content = content
         
-        # Pour le XML sur une seule ligne, on doit utiliser une approche différente
-        # Chercher tous les blocs ExpProps qui contiennent à la fois "no variable linked" et SymVarName
+        # Pattern ultra-simple : cherche "no variable linked" suivi (à un moment) de SymVarName
+        pattern = r'&amp;lt;no variable linked&amp;gt;(.*?)<SymVarName>([^<]+)</SymVarName>'
         
-        # Pattern pour capturer un bloc ExpProps complet avec "no variable linked" et SymVarName
-        # Utilise [^<>]* au lieu de .* pour éviter de capturer trop de contenu
-        exp_props_pattern = r'<ExpProps_\d+[^>]*>[^<]*<Name>[^<]*</Name>[^<]*<ExpPropValue>([^<]*&amp;lt;no variable linked&amp;gt;[^<]*<SymVarName>([^<]+)</SymVarName>[^<]*)</ExpPropValue>[^<]*</ExpProps_\d+>'
-        
-        def process_exp_props(match):
-            exp_prop_content = match.group(1)  # Contenu de ExpPropValue
-            sym_var_name = match.group(2)     # Variable dans SymVarName
+        def replace_with_variable(match):
+            middle_part = match.group(1)  # Ce qu'il y a entre "no variable linked" et SymVarName
+            variable_name = match.group(2)  # La variable dans SymVarName
             
-            if sym_var_name and sym_var_name.strip():
-                print(f"  🔄 Remplacement 'no variable linked' par: '{sym_var_name}'")
-                
-                # Remplacer toutes les occurrences de "&amp;lt;no variable linked&amp;gt;" dans ce bloc
-                new_exp_prop_content = exp_prop_content.replace(
-                    '&amp;lt;no variable linked&amp;gt;', 
-                    sym_var_name
-                )
-                
-                # Retourner le bloc complet avec le contenu modifié
-                return match.group(0).replace(exp_prop_content, new_exp_prop_content)
+            if variable_name and variable_name.strip():
+                print(f"    🔄 Remplacement par variable: '{variable_name}'")
+                # Remplacer "no variable linked" par la vraie variable
+                return variable_name + middle_part + f'<SymVarName>{variable_name}</SymVarName>'
+            
+            return match.group(0)  # Pas de changement si pas de variable
+        
+        # Compter les matches avant traitement
+        matches = re.findall(pattern, modified_content)
+        print(f"    🔍 Trouvé {len(matches)} segment(s) à traiter")
+        
+        # Appliquer les remplacements
+        modified_content = re.sub(pattern, replace_with_variable, modified_content)
+        
+        # Deuxième passe : corriger les PvID qui contiennent encore "no variable linked"
+        # Chercher les PvID="&amp;lt;no variable linked&amp;gt;" et les remplacer
+        pvid_pattern = r'PvID="&amp;lt;no variable linked&amp;gt;"([^<]*)<SymVarName>([^<]+)</SymVarName>'
+        
+        def fix_pvid(match):
+            middle_part = match.group(1)
+            variable_name = match.group(2)
+            
+            if variable_name and variable_name.strip():
+                print(f"    🔄 Correction PvID pour: '{variable_name}'")
+                return f'PvID="{variable_name}"{middle_part}<SymVarName>{variable_name}</SymVarName>'
             
             return match.group(0)
         
-        # Debug : vérifier si le pattern principal trouve des matches
-        exp_props_matches = re.findall(exp_props_pattern, modified_content)
-        print(f"    🔍 Pattern ExpProps trouvé {len(exp_props_matches)} match(es)")
-        
-        # Appliquer le remplacement pour les blocs ExpProps
-        modified_content = re.sub(exp_props_pattern, process_exp_props, modified_content)
-        
-        # Approche de secours : traitement direct pour les cas non capturés
-        # Chercher tous les segments qui ont "no variable linked" suivi de SymVarName dans un contexte proche
-        fallback_pattern = r'(&amp;lt;no variable linked&amp;gt;[^<]*<[^>]*>[^<]*<[^>]*>[^<]*PvID="&amp;lt;no variable linked&amp;gt;"[^<]*<SymVarName>([^<]+)</SymVarName>)'
-        
-        def fallback_replace(match):
-            full_segment = match.group(0)
-            sym_var_name = match.group(2)
-            
-            if sym_var_name and sym_var_name.strip():
-                print(f"  🔄 Correction fallback 'no variable linked' par: '{sym_var_name}'")
-                result = full_segment.replace('&amp;lt;no variable linked&amp;gt;', sym_var_name)
-                return result
-            
-            return full_segment
-        
-        # Debug : vérifier si le pattern de secours trouve des matches
-        fallback_matches = re.findall(fallback_pattern, modified_content)
-        print(f"    🔍 Pattern fallback trouvé {len(fallback_matches)} match(es)")
-        
-        # Appliquer le remplacement de secours
-        modified_content = re.sub(fallback_pattern, fallback_replace, modified_content)
+        # Compter et appliquer les corrections PvID
+        pvid_matches = re.findall(pvid_pattern, modified_content)
+        print(f"    🔍 Trouvé {len(pvid_matches)} PvID à corriger")
+        modified_content = re.sub(pvid_pattern, fix_pvid, modified_content)
         
         return modified_content
 
@@ -210,15 +190,12 @@ class XMLFormatter:
             # Appliquer les transformations
             modified_content = original_content
             
-            # Debug : vérifier la présence des patterns à traiter
-            has_no_variable_linked = '&amp;lt;no variable linked&amp;gt;' in original_content
-            has_bg_intelliblower = 'BGIntelliBlowerNumberStation[' in original_content
+            # Debug simple : vérifier ce qu'on doit traiter
+            no_var_count = original_content.count('&amp;lt;no variable linked&amp;gt;')
+            symvar_count = original_content.count('<SymVarName>')
             
-            print(f"  🔍 Debug: Contient 'no variable linked': {has_no_variable_linked}")
-            print(f"  🔍 Debug: Contient 'BGIntelliBlowerNumberStation': {has_bg_intelliblower}")
-            
-            if has_no_variable_linked:
-                print(f"  🔍 Debug: Nombre d'occurrences 'no variable linked': {original_content.count('&amp;lt;no variable linked&amp;gt;')}")
+            print(f"  🔍 Debug: {no_var_count} 'no variable linked' à traiter")
+            print(f"  🔍 Debug: {symvar_count} balises SymVarName disponibles")
             
             # 1. Transformations de base (changements de casse)
             print(f"  📝 Étape 1: Transformations de base...")
