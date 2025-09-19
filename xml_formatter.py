@@ -58,36 +58,38 @@ class XMLFormatter:
         """
         modified_content = content
         
-        # Pattern pour trouver les blocs ExpProps avec "no variable linked"
-        pattern = r'<ExpProps_(\d+)[^>]*>.*?<Name>([^<]+)</Name>.*?<ExpPropValue>(.*?)</ExpPropValue>.*?</ExpProps_\1>'
+        # Approche plus simple : traiter chaque bloc ExpProps individuellement
+        # Pattern pour capturer un bloc ExpProps complet
+        exp_props_pattern = r'<ExpProps_(\d+)[^>]*>.*?</ExpProps_\1>'
         
-        def replace_no_variable(match):
-            prop_num = match.group(1)
-            name = match.group(2)
-            exp_prop_value = match.group(3)
+        def process_exp_props_block(match):
+            full_block = match.group(0)
             
-            # Chercher la variable dans SymVarName
-            sym_var_match = re.search(r'<SymVarName>([^<]+)</SymVarName>', exp_prop_value)
+            # Vérifier si ce bloc contient "no variable linked"
+            if '&amp;lt;no variable linked&amp;gt;' not in full_block:
+                return full_block  # Pas de changement nécessaire
+            
+            # Extraire la variable de SymVarName
+            sym_var_match = re.search(r'<SymVarName>([^<]+)</SymVarName>', full_block)
             
             if sym_var_match:
                 sym_var_name = sym_var_match.group(1)
                 
-                # Si SymVarName n'est pas vide et qu'on a "no variable linked" dans PvID
-                if sym_var_name and sym_var_name.strip() and '&amp;lt;no variable linked&amp;gt;' in exp_prop_value:
-                    print(f"  🔄 Synchronisation détectée pour {name}: '{sym_var_name}'")
+                # Si SymVarName contient une vraie variable (pas vide)
+                if sym_var_name and sym_var_name.strip():
+                    print(f"  🔄 Remplacement 'no variable linked' par: '{sym_var_name}'")
                     
-                    # Remplacer "&amp;lt;no variable linked&amp;gt;" par la vraie variable
-                    new_exp_prop_value = exp_prop_value.replace(
+                    # Remplacer toutes les occurrences de "&amp;lt;no variable linked&amp;gt;"
+                    modified_block = full_block.replace(
                         '&amp;lt;no variable linked&amp;gt;', 
                         sym_var_name
                     )
                     
-                    # Construire le nouveau bloc ExpProps
-                    return f'<ExpProps_{prop_num} NODE="zenOn(R) embedded object"><Name>{name}</Name><ExpPropValue>{new_exp_prop_value}</ExpPropValue></ExpProps_{prop_num}>'
+                    return modified_block
             
-            return match.group(0)  # Retourner inchangé si pas de SymVarName trouvé
+            return full_block  # Retourner inchangé
         
-        modified_content = re.sub(pattern, replace_no_variable, modified_content, flags=re.DOTALL)
+        modified_content = re.sub(exp_props_pattern, process_exp_props_block, modified_content, flags=re.DOTALL)
         
         return modified_content
 
