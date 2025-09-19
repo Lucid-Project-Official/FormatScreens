@@ -59,12 +59,12 @@ class XMLFormatter:
     def fix_no_variable_linked(self, content: str) -> str:
         """
         Logique simple : trouve tous les segments qui ont "no variable linked" 
-        et une SymVarName, puis remplace par la variable trouvée.
+        et une SymVarName encodée, puis remplace par la variable trouvée.
         """
         modified_content = content
         
-        # Pattern ultra-simple : cherche "no variable linked" suivi (à un moment) de SymVarName
-        pattern = r'&amp;lt;no variable linked&amp;gt;(.*?)<SymVarName>([^<]+)</SymVarName>'
+        # Pattern avec balises encodées : &lt;SymVarName&gt; au lieu de <SymVarName>
+        pattern = r'&amp;lt;no variable linked&amp;gt;(.*?)&lt;SymVarName&gt;([^&]+)&lt;/SymVarName&gt;'
         
         def replace_with_variable(match):
             middle_part = match.group(1)  # Ce qu'il y a entre "no variable linked" et SymVarName
@@ -73,7 +73,7 @@ class XMLFormatter:
             if variable_name and variable_name.strip():
                 print(f"    🔄 Remplacement par variable: '{variable_name}'")
                 # Remplacer "no variable linked" par la vraie variable
-                return variable_name + middle_part + f'<SymVarName>{variable_name}</SymVarName>'
+                return variable_name + middle_part + f'&lt;SymVarName&gt;{variable_name}&lt;/SymVarName&gt;'
             
             return match.group(0)  # Pas de changement si pas de variable
         
@@ -86,7 +86,7 @@ class XMLFormatter:
         
         # Deuxième passe : corriger les PvID qui contiennent encore "no variable linked"
         # Chercher les PvID="&amp;lt;no variable linked&amp;gt;" et les remplacer
-        pvid_pattern = r'PvID="&amp;lt;no variable linked&amp;gt;"([^<]*)<SymVarName>([^<]+)</SymVarName>'
+        pvid_pattern = r'PvID="&amp;lt;no variable linked&amp;gt;"([^&]*)&lt;SymVarName&gt;([^&]+)&lt;/SymVarName&gt;'
         
         def fix_pvid(match):
             middle_part = match.group(1)
@@ -94,7 +94,7 @@ class XMLFormatter:
             
             if variable_name and variable_name.strip():
                 print(f"    🔄 Correction PvID pour: '{variable_name}'")
-                return f'PvID="{variable_name}"{middle_part}<SymVarName>{variable_name}</SymVarName>'
+                return f'PvID="{variable_name}"{middle_part}&lt;SymVarName&gt;{variable_name}&lt;/SymVarName&gt;'
             
             return match.group(0)
         
@@ -192,10 +192,12 @@ class XMLFormatter:
             
             # Debug simple : vérifier ce qu'on doit traiter
             no_var_count = original_content.count('&amp;lt;no variable linked&amp;gt;')
-            symvar_count = original_content.count('<SymVarName>')
+            symvar_count_raw = original_content.count('<SymVarName>')
+            symvar_count_encoded = original_content.count('&lt;SymVarName&gt;')
             
             print(f"  🔍 Debug: {no_var_count} 'no variable linked' à traiter")
-            print(f"  🔍 Debug: {symvar_count} balises SymVarName disponibles")
+            print(f"  🔍 Debug: {symvar_count_raw} balises SymVarName brutes")
+            print(f"  🔍 Debug: {symvar_count_encoded} balises SymVarName encodées")
             
             # 1. Transformations de base (changements de casse)
             print(f"  📝 Étape 1: Transformations de base...")
