@@ -42,6 +42,12 @@ class XMLFormatter:
         print(f"✓ Sauvegarde créée: {backup_path}")
         return backup_path
 
+    def is_single_line_xml(self, content: str) -> bool:
+        """Vérifie si le XML est sur une seule ligne."""
+        lines = content.strip().split('\n')
+        # Si le contenu principal est sur moins de 3 lignes, c'est probablement du XML sur une seule ligne
+        return len([line for line in lines if line.strip()]) <= 3
+
     def apply_basic_transformations(self, content: str) -> str:
         """Applique les transformations de base (changements de casse, etc.)."""
         modified_content = content
@@ -55,41 +61,55 @@ class XMLFormatter:
         """
         Détecte automatiquement les variables à partir des SymVarName et 
         synchronise les PvID avec les vraies variables.
+        Gère le XML sur une seule ligne.
         """
         modified_content = content
         
-        # Approche plus simple : traiter chaque bloc ExpProps individuellement
-        # Pattern pour capturer un bloc ExpProps complet
-        exp_props_pattern = r'<ExpProps_(\d+)[^>]*>.*?</ExpProps_\1>'
+        # Pour le XML sur une seule ligne, on doit utiliser une approche différente
+        # Chercher tous les blocs ExpProps qui contiennent à la fois "no variable linked" et SymVarName
         
-        def process_exp_props_block(match):
-            full_block = match.group(0)
+        # Pattern pour capturer un bloc ExpProps complet avec "no variable linked" et SymVarName
+        # Utilise [^<>]* au lieu de .* pour éviter de capturer trop de contenu
+        exp_props_pattern = r'<ExpProps_\d+[^>]*>[^<]*<Name>[^<]*</Name>[^<]*<ExpPropValue>([^<]*&amp;lt;no variable linked&amp;gt;[^<]*<SymVarName>([^<]+)</SymVarName>[^<]*)</ExpPropValue>[^<]*</ExpProps_\d+>'
+        
+        def process_exp_props(match):
+            exp_prop_content = match.group(1)  # Contenu de ExpPropValue
+            sym_var_name = match.group(2)     # Variable dans SymVarName
             
-            # Vérifier si ce bloc contient "no variable linked"
-            if '&amp;lt;no variable linked&amp;gt;' not in full_block:
-                return full_block  # Pas de changement nécessaire
-            
-            # Extraire la variable de SymVarName
-            sym_var_match = re.search(r'<SymVarName>([^<]+)</SymVarName>', full_block)
-            
-            if sym_var_match:
-                sym_var_name = sym_var_match.group(1)
+            if sym_var_name and sym_var_name.strip():
+                print(f"  🔄 Remplacement 'no variable linked' par: '{sym_var_name}'")
                 
-                # Si SymVarName contient une vraie variable (pas vide)
-                if sym_var_name and sym_var_name.strip():
-                    print(f"  🔄 Remplacement 'no variable linked' par: '{sym_var_name}'")
-                    
-                    # Remplacer toutes les occurrences de "&amp;lt;no variable linked&amp;gt;"
-                    modified_block = full_block.replace(
-                        '&amp;lt;no variable linked&amp;gt;', 
-                        sym_var_name
-                    )
-                    
-                    return modified_block
+                # Remplacer toutes les occurrences de "&amp;lt;no variable linked&amp;gt;" dans ce bloc
+                new_exp_prop_content = exp_prop_content.replace(
+                    '&amp;lt;no variable linked&amp;gt;', 
+                    sym_var_name
+                )
+                
+                # Retourner le bloc complet avec le contenu modifié
+                return match.group(0).replace(exp_prop_content, new_exp_prop_content)
             
-            return full_block  # Retourner inchangé
+            return match.group(0)
         
-        modified_content = re.sub(exp_props_pattern, process_exp_props_block, modified_content, flags=re.DOTALL)
+        # Appliquer le remplacement pour les blocs ExpProps
+        modified_content = re.sub(exp_props_pattern, process_exp_props, modified_content)
+        
+        # Approche de secours : traitement direct pour les cas non capturés
+        # Chercher tous les segments qui ont "no variable linked" suivi de SymVarName dans un contexte proche
+        fallback_pattern = r'(&amp;lt;no variable linked&amp;gt;[^<]*<[^>]*>[^<]*<[^>]*>[^<]*PvID="&amp;lt;no variable linked&amp;gt;"[^<]*<SymVarName>([^<]+)</SymVarName>)'
+        
+        def fallback_replace(match):
+            full_segment = match.group(0)
+            sym_var_name = match.group(2)
+            
+            if sym_var_name and sym_var_name.strip():
+                print(f"  🔄 Correction fallback 'no variable linked' par: '{sym_var_name}'")
+                result = full_segment.replace('&amp;lt;no variable linked&amp;gt;', sym_var_name)
+                return result
+            
+            return full_segment
+        
+        # Appliquer le remplacement de secours
+        modified_content = re.sub(fallback_pattern, fallback_replace, modified_content)
         
         return modified_content
 
@@ -165,6 +185,12 @@ class XMLFormatter:
             # Lire le contenu du fichier
             with open(file_path, 'r', encoding='utf-16') as f:
                 original_content = f.read()
+            
+            # Détecter si c'est du XML sur une seule ligne
+            if self.is_single_line_xml(original_content):
+                print(f"  📄 Détection: XML sur une seule ligne")
+            else:
+                print(f"  📄 Détection: XML multi-lignes")
             
             # Créer une sauvegarde
             self.backup_file(file_path)
